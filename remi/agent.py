@@ -59,8 +59,7 @@ class RemiAgent:
 
         today = datetime.now().strftime("%Y-%m-%d")
         time_now = datetime.now().strftime("%H:%M")
-        system = SYSTEM_PROMPT.format(today=today, time=time_now)
-
+                system = SYSTEM_PROMPT.replace("{today}", today).replace("{time}", time_now)
         messages = [{"role": h["role"], "content": h["content"]} for h in history]
 
         user_content = message
