@@ -7,12 +7,13 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = os.getenv("DB_PATH", "remi.db")
+DB_PATH = os.getenv("DB_PATH", "/data/remi.db")
 
 
 class Database:
     def __init__(self):
         self.path = DB_PATH
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._init()
 
     def _conn(self):
