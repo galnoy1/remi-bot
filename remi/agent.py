@@ -81,6 +81,11 @@ class RemiAgent:
         )
 
         raw = resp.content[0].text.strip()
+        # Strip markdown code block wrapper if present (e.g. ```json ... ```)
+        if raw.startswith("```"):
+            raw = "\n".join(raw.split("\n")[1:])
+            if raw.endswith("```"):
+                raw = raw[:-3].strip()
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
