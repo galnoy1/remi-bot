@@ -5,6 +5,8 @@ Understands Hebrew, extracts intents, manages tasks, reminders & Google Calendar
 
 import os
 import json
+import tempfile
+import requests
 from datetime import datetime
 import anthropic
 from database import db
@@ -46,7 +48,50 @@ class RemiAgent:
     def __init__(self):
         self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-    async def process(self, user_id, user_phone, message, history, media_url=None):
+    def _transcribe_audio(self, media_url: str) -> str:
+        """Download audio from Twilio and transcribe using OpenAI Whisper."""
+        try:
+            import openai
+            account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+            auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+            openai_key = os.environ.get("OPENAI_API_KEY", "")
+            if not openai_key:
+                return ""
+            # Download audio from Twilio (requires auth)
+            r = requests.get(media_url, auth=(account_sid, auth_token), timeout=15)
+            if r.status_code != 200:
+                return ""
+            # Save to temp file
+            suffix = ".ogg"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(r.content)
+                tmp_path = tmp.name
+            # Transcribe with Whisper
+            oai = openai.OpenAI(api_key=openai_key)
+            with open(tmp_path, "rb") as audio_file:
+                transcript = oai.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language="he",
+                )
+            os.unlink(tmp_path)
+            return transcript.text.strip()
+        except Exception as e:
+            print(f"[transcribe] error: {e}")
+            return ""
+
+    async def process(self, user_id, user_phone, message, history, media_url=None, media_type=None):
+
+        # Handle voice messages
+        is_audio = media_type and media_type.startswith("audio/")
+        if is_audio and media_url:
+            transcribed = self._transcribe_audio(media_url)
+            if transcribed:
+                message = f"[הודעה קולית]: {transcribed}"
+            elif not os.environ.get("OPENAI_API_KEY"):
+                return "🎤 קיבלתי הודעה קולית! כדי שאוכל להבין אותה, צריך להוסיף OPENAI_API_KEY להגדרות ב-Railway."
+            else:
+                return "🎤 לא הצלחתי לתמלל את ההודעה הקולית. נסה שוב אה כתוב טקסט."
 
         # Google auth code flow
         if message.startswith("AUTH:") and len(message) > 10:
@@ -60,6 +105,7 @@ class RemiAgent:
         today = datetime.now().strftime("%Y-%m-%d")
         time_now = datetime.now().strftime("%H:%M")
         system = SYSTEM_PROMPT.replace("{today}", today).replace("{time}", time_now)
+
         messages = [{"role": h["role"], "content": h["content"]} for h in history]
 
         user_content = message
