@@ -14,7 +14,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-TOKENS_DIR = Path(os.getenv("TOKENS_DIR", "tokens"))
+TOKENS_DIR = Path(os.getenv("TOKENS_DIR", "/data/tokens"))
 
 
 def _token_path(user_id: int) -> Path:
