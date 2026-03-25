@@ -5,6 +5,7 @@ Understands Hebrew, extracts intents, manages tasks, reminders & Google Calendar
 
 import os
 import json
+import re
 import tempfile
 import requests
 from datetime import datetime
@@ -24,7 +25,7 @@ SYSTEM_PROMPT = """אתה רֶמי — עוזר אישי חכם בוואטסאפ
 3. לנהל יומן Google Calendar — לקרוא אירועים, ליצור פגישות חדשות
 4. לענות לשאלות כלליות ולשוחח בצורה אנושית
 
-תגיב תמיד עם JSON בלבד:
+תגיב תמיד עם JSON בלבד, ללא עטיפת markdown:
 {
   "reply": "תשובה בעברית",
   "action": null | "add_task" | "list_tasks" | "complete_task" |
@@ -40,8 +41,44 @@ SYSTEM_PROMPT = """אתה רֶמי — עוזר אישי חכם בוואטסאפ
 - add_reminder: {"text": "פגישה", "remind_at": "2025-01-20 09:00", "recurring": null}
 - create_calendar_event: {"title": "פגישת צוות", "start_dt": "2025-01-20T10:00:00", "end_dt": "2025-01-20T11:00:00", "location": "משרד"}
 
+חשוב: החזר JSON בלבד — אל תעטוף ב-```json או כל markdown אחר.
 היום: {today} | שעה: {time}
 """
+
+
+def _extract_json(text: str) -> dict:
+    """Robustly extract JSON from Claude's response, handling markdown wrappers."""
+    text = text.strip()
+
+    # Remove markdown code block wrappers (handles trailing newlines too)
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove first line (```json or ```)
+        lines = lines[1:]
+        # Remove last ``` line if present
+        while lines and lines[-1].strip() in ("```", ""):
+            if lines[-1].strip() == "```":
+                lines.pop()
+                break
+            lines.pop()
+        text = "\n".join(lines).strip()
+
+    # Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: find the first { ... } block in the text
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # Give up — return a safe default
+    return {"reply": text, "action": None, "data": {}}
 
 
 class RemiAgent:
@@ -91,7 +128,7 @@ class RemiAgent:
             elif not os.environ.get("OPENAI_API_KEY"):
                 return "🎤 קיבלתי הודעה קולית! כדי שאוכל להבין אותה, צריך להוסיף OPENAI_API_KEY להגדרות ב-Railway."
             else:
-                return "🎤 לא הצלחתי לתמלל את ההודעה הקולית. נסה שוב אה כתוב טקסט."
+                return "🎤 לא הצלחתי לתמלל את ההודעה הקולית. נסה שוב או כתוב טקסט."
 
         # Google auth code flow
         if message.startswith("AUTH:") and len(message) > 10:
@@ -127,15 +164,7 @@ class RemiAgent:
         )
 
         raw = resp.content[0].text.strip()
-        # Strip markdown code block wrapper if present (e.g. ```json ... ```)
-        if raw.startswith("```"):
-            raw = "\n".join(raw.split("\n")[1:])
-            if raw.endswith("```"):
-                raw = raw[:-3].strip()
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return raw
+        parsed = _extract_json(raw)
 
         reply = parsed.get("reply", "סליחה, לא הצלחתי להבין 🙏")
         action = parsed.get("action")
