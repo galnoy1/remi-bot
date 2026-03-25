@@ -4,10 +4,11 @@ FastAPI backend connecting Twilio WhatsApp + Claude AI
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Request, HTTPException
 from fastapi.responses import Response
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.messaging_response import MessagingResponse
+from twilio.request_validator import RequestValidator
 import asyncio
 import os
 from datetime import datetime, timedelta
@@ -89,16 +90,38 @@ async def lifespan(app):
 
 app = FastAPI(title="Remi AI Assistant", lifespan=lifespan)
 agent = RemiAgent()
+_twilio_validator = RequestValidator(os.environ.get("TWILIO_AUTH_TOKEN", ""))
+
+
+def _build_request_url(request: Request) -> str:
+    """Reconstruct the public-facing URL as Twilio sees it (handles Railway proxy)."""
+    proto = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    path = request.url.path
+    query = request.url.query
+    url = f"{proto}://{host}{path}"
+    if query:
+        url += f"?{query}"
+    return url
 
 
 @app.post("/webhook")
-async def webhook(
-    From: str = Form(...),
-    Body: str = Form(...),
-    MediaUrl0: str = Form(default=None),
-    MediaContentType0: str = Form(default=None),
-):
+async def webhook(request: Request):
     """Twilio sends incoming WhatsApp messages here."""
+    form_data = await request.form()
+    params = dict(form_data)
+
+    # ── Validate Twilio signature ──────────────────────────────────────────────
+    signature = request.headers.get("X-Twilio-Signature", "")
+    url = _build_request_url(request)
+    if not _twilio_validator.validate(url, params, signature):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    From = params.get("From", "")
+    Body = params.get("Body", "")
+    MediaUrl0 = params.get("MediaUrl0")
+    MediaContentType0 = params.get("MediaContentType0")
+
     user_phone = From.replace("whatsapp:", "")
     message_text = Body.strip()
 
