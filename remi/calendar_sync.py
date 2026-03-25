@@ -17,6 +17,25 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKENS_DIR = Path(os.getenv("TOKENS_DIR", "/data/tokens"))
 
 
+def _get_client_secrets_file() -> str:
+    """Returns path to client_secrets.json, writing from env var if needed."""
+    # Option 1: explicit file path set in env
+    file_path = os.getenv("GOOGLE_CLIENT_SECRETS_FILE")
+    if file_path and Path(file_path).exists():
+        return file_path
+
+    # Option 2: full JSON content stored in env var (for cloud deployments)
+    json_content = os.getenv("GOOGLE_CLIENT_SECRETS_JSON")
+    if json_content:
+        secrets_path = Path("/data/client_secrets.json")
+        secrets_path.parent.mkdir(parents=True, exist_ok=True)
+        secrets_path.write_text(json_content)
+        return str(secrets_path)
+
+    # Option 3: fallback to local file
+    return "client_secrets.json"
+
+
 def _token_path(user_id: int) -> Path:
     TOKENS_DIR.mkdir(exist_ok=True)
     return TOKENS_DIR / f"user_{user_id}.json"
@@ -42,7 +61,7 @@ def get_calendar_service(user_id: int):
 
 def get_auth_url(user_id: int) -> str:
     """Returns a Google OAuth URL the user must visit to authorize."""
-    client_secrets = os.getenv("GOOGLE_CLIENT_SECRETS_FILE", "client_secrets.json")
+    client_secrets = _get_client_secrets_file()
     flow = InstalledAppFlow.from_client_secrets_file(
         client_secrets,
         SCOPES,
@@ -58,7 +77,7 @@ def get_auth_url(user_id: int) -> str:
 
 def save_token_from_code(user_id: int, auth_code: str):
     """Exchange auth code for tokens and save them."""
-    client_secrets = os.getenv("GOOGLE_CLIENT_SECRETS_FILE", "client_secrets.json")
+    client_secrets = _get_client_secrets_file()
     flow = InstalledAppFlow.from_client_secrets_file(
         client_secrets,
         SCOPES,
